@@ -20,33 +20,94 @@ class PathPlanning:
         self.cones = cones
 
     def generatePath(self) -> Path2D:
-        """Return a list of path points (x, y) in world frame.
-
-        Requirements and notes:
-        - Cones: color==0 (yellow) are on the RIGHT of the track; color==1 (blue) are on the LEFT.
-        - You may be given 2, 1, or 0 cones on each side.
-        - Use the car pose (x, y, yaw) to seed your path direction if needed.
-        - Return a drivable path that stays between left (blue) and right (yellow) cones.
-        - The returned path will be visualized by PathTester.
-
-        The path can contain as many points as you like, but it should be between 5-10 meters,
-        with a step size <= 0.5. Units are meters.
-
-        Replace the placeholder implementation below with your algorithm.
-        """
-
-        # Default: produce a short straight-ahead path from the current pose.
-        # delete/replace this with your own algorithm.
-        num_points = 25
-        step = 0.5
-        cx = self.car_pose.x
-        cy = self.car_pose.y
         import math
 
-        path: Path2D = []
-        for i in range(1, num_points + 1):
-            dx = math.cos(self.car_pose.yaw) * step * i
-            dy = math.sin(self.car_pose.yaw) * step * i
-            path.append((cx + dx, cy + dy))
+        num_points = 20
+        step = 0.5
+        safe_offset = 1.25  # 2.5m track width
+        blend_dist = 2.0   
 
-        return path
+        yaw = self.car_pose.yaw
+        cx, cy = self.car_pose.x, self.car_pose.y
+        cos_yaw, sin_yaw = math.cos(-yaw), math.sin(-yaw)
+
+        # transform cones to the car's local frame
+        blue_local = []
+        yellow_local = []
+        for cone in self.cones:
+            dx, dy = cone.x - cx, cone.y - cy
+            lx = dx * cos_yaw - dy * sin_yaw
+            ly = dx * sin_yaw + dy * cos_yaw
+            if cone.color == 1:
+                blue_local.append((lx, ly))
+            else:
+                yellow_local.append((lx, ly))
+
+        # interpolate Y given X in local frame
+        def interpolate_y(x: float, cones_local: list):
+            if not cones_local:
+                return None
+            if len(cones_local) == 1:
+                return cones_local[0][1]
+            
+            # sort cones by local X
+            cones_local = sorted(cones_local, key=lambda c: c[0])
+            
+            # find the best line segment
+            c1, c2 = cones_local[0], cones_local[1]
+            for i in range(len(cones_local) - 1):
+                if cones_local[i][0] <= x:
+                    c1, c2 = cones_local[i], cones_local[i+1]
+                else:
+                    break
+                    
+            dx_val = c2[0] - c1[0]
+            if abs(dx_val) < 1e-3:
+                return c1[1]
+                
+            slope = (c2[1] - c1[1]) / dx_val
+            return c1[1] + slope * (x - c1[0])
+
+        # generate path in local frame
+        local_path = []
+        for i in range(1, num_points + 1):
+            x = i * step
+            
+            y_blue = interpolate_y(x, blue_local)
+            y_yellow = interpolate_y(x, yellow_local)
+            
+            if y_blue is not None and y_yellow is not None:
+                y_center = (y_blue + y_yellow) / 2.0
+            elif y_blue is not None:
+                y_center = y_blue - safe_offset
+            elif y_yellow is not None:
+                y_center = y_yellow + safe_offset
+            else:
+                y_center = 0.0
+
+            # blend the path to start from the car's current heading
+            blend = min(1.0, max(0.0, x / blend_dist))
+            blend = blend * blend * (3 - 2 * blend)  # smoothing
+            
+            local_path.append((x, y_center * blend))
+
+        # smooth corners using a moving average
+        smoothed_path = []
+        window = 3
+        half_w = window // 2
+        n = len(local_path)
+        for i in range(n):
+            start = max(0, i - half_w)
+            end = min(n, i + half_w + 1)
+            avg_y = sum(p[1] for p in local_path[start:end]) / (end - start)
+            smoothed_path.append((local_path[i][0], avg_y))
+
+        # transform back to world frame
+        world_path: Path2D = []
+        inv_cos, inv_sin = math.cos(yaw), math.sin(yaw)
+        for lx, ly in smoothed_path:
+            wx = cx + lx * inv_cos - ly * inv_sin
+            wy = cy + lx * inv_sin + ly * inv_cos
+            world_path.append((wx, wy))
+
+        return world_path
