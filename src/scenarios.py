@@ -137,7 +137,8 @@ _SCENARIOS: Dict[str, Tuple[List[Cone], CarPose]] = {
         CarPose(x=0.0, y=0.0, yaw=1.8),
     ),
     
-    # --- Part 2: Three Cones Scenarios ---
+    # three cones scenarios
+    
     "21": (
         [
             Cone(x=1.0, y=3.0, color=1),

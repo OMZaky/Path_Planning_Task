@@ -24,7 +24,7 @@ class PathPlanning:
 
         num_points = 20
         step = 0.5
-        safe_offset = 1.25  # 2.5m track width
+        safe_offset = 1.25  # half the track width (2.5 m)
         blend_dist = 2.0   
 
         yaw = self.car_pose.yaw
@@ -70,7 +70,7 @@ class PathPlanning:
 
         # generate path in local frame
         local_path = []
-        for i in range(1, num_points + 1):
+        for i in range(0, num_points + 1):  # start from 0 to anchor at car
             x = i * step
             
             y_blue = interpolate_y(x, blue_local)
@@ -85,13 +85,9 @@ class PathPlanning:
             else:
                 y_center = 0.0
 
-            # blend the path to start from the car's current heading
-            blend = min(1.0, max(0.0, x / blend_dist))
-            blend = blend * blend * (3 - 2 * blend)  # smoothing
-            
-            local_path.append((x, y_center * blend))
+            local_path.append((x, y_center))
 
-        # smooth corners using a moving average
+        # smooth corners using a moving average FIRST, then blend
         smoothed_path = []
         window = 3
         half_w = window // 2
@@ -100,7 +96,13 @@ class PathPlanning:
             start = max(0, i - half_w)
             end = min(n, i + half_w + 1)
             avg_y = sum(p[1] for p in local_path[start:end]) / (end - start)
-            smoothed_path.append((local_path[i][0], avg_y))
+            
+            # blend the path to start exactly from the car's heading
+            x = local_path[i][0]
+            blend = min(1.0, max(0.0, x / blend_dist))
+            blend = blend * blend * (3 - 2 * blend)  # smoothing
+            
+            smoothed_path.append((x, avg_y * blend))
 
         # transform back to world frame
         world_path: Path2D = []
